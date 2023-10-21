@@ -11,6 +11,8 @@ class BetaVAE(BaseVAE):
 
     def __init__(self,
                  in_channels: int,
+                 in_width: int,
+                 in_heigth: int,
                  latent_dim: int,
                  hidden_dims: List = None,
                  beta: int = 4,
@@ -18,7 +20,7 @@ class BetaVAE(BaseVAE):
                  max_capacity: int = 25,
                  Capacity_max_iter: int = 1e5,
                  loss_type:str = 'B',
-                 **kwargs) -> None:
+                 kernel_size=3) -> None:
         super(BetaVAE, self).__init__()
 
         self.latent_dim = latent_dim
@@ -27,11 +29,14 @@ class BetaVAE(BaseVAE):
         self.loss_type = loss_type
         self.C_max = torch.Tensor([max_capacity])
         self.C_stop_iter = Capacity_max_iter
-
+        self.kernel_size=kernel_size
+        self.in_width=in_width
+        self.in_heigth=in_heigth
         modules = []
         if hidden_dims is None:
             hidden_dims = [32, 64, 128, 256, 512]
-
+        output_height=self.in_heigth
+        output_width=self.in_width
         # Build Encoder
         for h_dim in hidden_dims:
             modules.append(
@@ -42,16 +47,19 @@ class BetaVAE(BaseVAE):
                     nn.LeakyReLU())
             )
             in_channels = h_dim
-
+            output_height = int((output_height - 3 + 2 * 1) / 2 + 1)
+            output_width = int((output_width - 3 + 2 * 1) / 2 + 1)
+        self.output_height=output_height
+        self.output_width=output_width    
         self.encoder = nn.Sequential(*modules)
-        self.fc_mu = nn.Linear(hidden_dims[-1]*4, latent_dim)
-        self.fc_var = nn.Linear(hidden_dims[-1]*4, latent_dim)
+        self.fc_mu = nn.Linear(hidden_dims[-1]*output_height*output_width, latent_dim)
+        self.fc_var = nn.Linear(hidden_dims[-1]*output_height*output_width, latent_dim)
 
 
         # Build Decoder
         modules = []
 
-        self.decoder_input = nn.Linear(latent_dim, hidden_dims[-1] * 4)
+        self.decoder_input = nn.Linear(latent_dim, hidden_dims[-1] * output_height*output_width)
 
         hidden_dims.reverse()
 
@@ -81,9 +89,8 @@ class BetaVAE(BaseVAE):
                                                output_padding=1),
                             nn.BatchNorm2d(hidden_dims[-1]),
                             nn.LeakyReLU(),
-                            nn.Conv2d(hidden_dims[-1], out_channels= 3,
-                                      kernel_size= 3, padding= 1),
-                            nn.Tanh())
+                            nn.Conv2d(hidden_dims[-1], out_channels= 1,
+                                      kernel_size= 3, padding= 1))
 
     def encode(self, input: Tensor) -> List[Tensor]:
         """
@@ -104,7 +111,7 @@ class BetaVAE(BaseVAE):
 
     def decode(self, z: Tensor) -> Tensor:
         result = self.decoder_input(z)
-        result = result.view(-1, 512, 2, 2)
+        result = result.view(-1, 512, self.output_width, self.output_height)
         result = self.decoder(result)
         result = self.final_layer(result)
         return result
